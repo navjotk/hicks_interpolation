@@ -4,7 +4,7 @@ from scipy.signal.windows import kaiser
 
 from devito import PrecomputedSparseTimeFunction, TimeFunction, solve, Eq, Operator
 from examples.seismic import Receiver, TimeAxis, RickerSource
-from fwi.overthrust import overthrust_solver_iso, overthrust_model_iso
+from overthrust import overthrust_solver_iso, overthrust_model_iso
 
 
 def run():
@@ -24,7 +24,7 @@ def run():
     grid = model.grid
     origin = (0, 0, 0)
     spacing = model.spacing
-    r = 32
+    r = 64
     coeffs = kaiser(M=r, beta=6.31)
 
     
@@ -74,7 +74,7 @@ def run():
     # Substitute spacing terms to reduce flops
     op = Operator(eqns + src_term + rec_term, subs=model.spacing_map,
                     name='Forward')
-    op.apply()
+    op.apply(dt=dt)
 
 
 if __name__ == "__main__":
