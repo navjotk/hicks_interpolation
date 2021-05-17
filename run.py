@@ -1,15 +1,19 @@
+import click
 import numpy as np
 from math import floor
 from scipy.signal.windows import kaiser
-
+import matplotlib.pyplot as plt
 from devito import PrecomputedSparseTimeFunction, TimeFunction, solve, Eq, Operator
 from examples.seismic import Receiver, TimeAxis, RickerSource
-from overthrust import overthrust_solver_iso, overthrust_model_iso
+from overthrust import overthrust_model_iso
 
 
-def run():
+@click.command()
+@click.option("--r", type=int, default=16, help="The radius of the source scatter")
+@click.option("--srcpd", type=int, default=785, help="Number of sources per dimension (total number will be square of this number)")
+def run(r=16, srcpd=785):
     initial_model_filename = "overthrust_3D_initial_model.h5"
-    tn = 50
+    tn = 5
     so = 6
     dtype = np.float32
     datakey = "m0"
@@ -24,29 +28,31 @@ def run():
     grid = model.grid
     origin = (0, 0, 0)
     spacing = model.spacing
-    r = 64
+
     coeffs = kaiser(M=r, beta=6.31)
 
-    
-    nsrc = shape[0] - r
+    # What we accepted as a parameter was sources per dimension. We are going to lay them out on a grid so square the number
+    nsrc = srcpd * srcpd 
     src_coordinates = np.empty((nsrc, len(spacing)))
     offset = grid.spacing[0] * r/2
-    src_coordinates[:, 0] = np.linspace(offset, model.domain_size[0]-offset, num=nsrc)
-    if len(shape) > 1:
-        src_coordinates[:, 1] = np.array(model.domain_size)[1] * .5
-        src_coordinates[:, -1] = model.origin[-1] + (2 + r/2)* spacing[-1]
-    
+    onedpoints = np.linspace(offset, model.domain_size[0]-offset, num=srcpd)
+    twodpoints = np.meshgrid(onedpoints, onedpoints)
+    xcoords = np.ravel(twodpoints[0])
+    ycoords = np.ravel(twodpoints[1])
+    src_coordinates[:, 0] = xcoords
+    src_coordinates[:, 1] = ycoords
+    src_coordinates[:, -1] = model.origin[-1] + (2 + r/2)* spacing[-1]
+    plt.scatter(xcoords, ycoords, s=0.01)
+    plt.show()
+
     gridpoints = [tuple((int(floor((point[i]-origin[i])/grid.spacing[i])) - r/2)
                         for i in range(len(point))) for point in src_coordinates]
 
-
     src = PrecomputedSparseTimeFunction(name="src", grid=grid, npoint=nsrc, r=r, gridpoints=gridpoints, interpolation_coeffs=coeffs, nt=nt)
+    
     ricker = RickerSource(time_range=time_axis, grid=grid, name="ricker", f0=0.008)
     for p in range(nsrc):
         src.data[:, p] = ricker.wavelet
-    solver_params = {'h5_file': initial_model_filename, 'tn': tn,
-                     'space_order': so, 'dtype': dtype, 'datakey': datakey,
-                     'nbl': nbl, 'src_coordinates': src_coordinates}
 
     m = model.m
 
@@ -74,7 +80,11 @@ def run():
     # Substitute spacing terms to reduce flops
     op = Operator(eqns + src_term + rec_term, subs=model.spacing_map,
                     name='Forward')
+    
     op.apply(dt=dt)
+
+    print("u_norm", np.linalg.norm(u.data))
+    
 
 
 if __name__ == "__main__":
