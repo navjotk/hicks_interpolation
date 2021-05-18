@@ -1,6 +1,6 @@
 import click
 import numpy as np
-from math import floor
+from math import cos, floor, sin
 from scipy.signal.windows import kaiser
 import matplotlib.pyplot as plt
 from devito import PrecomputedSparseTimeFunction, TimeFunction, solve, Eq, Operator
@@ -11,7 +11,8 @@ from overthrust import overthrust_model_iso
 @click.command()
 @click.option("--r", type=int, default=16, help="The radius of the source scatter")
 @click.option("--srcpd", type=int, default=785, help="Number of sources per dimension (total number will be square of this number)")
-def run(r=16, srcpd=785):
+@click.option("--layout", type=click.Choice(['grid', 'hemisphere']), default="grid", help="Shape to arrange sources in: grid or hemisphere")
+def run(r, srcpd, layout):
     initial_model_filename = "overthrust_3D_initial_model.h5"
     tn = 5
     so = 6
@@ -32,18 +33,15 @@ def run(r=16, srcpd=785):
     coeffs = kaiser(M=r, beta=6.31)
 
     # What we accepted as a parameter was sources per dimension. We are going to lay them out on a grid so square the number
-    nsrc = srcpd * srcpd 
-    src_coordinates = np.empty((nsrc, len(spacing)))
-    offset = grid.spacing[0] * r/2
-    onedpoints = np.linspace(offset, model.domain_size[0]-offset, num=srcpd)
-    twodpoints = np.meshgrid(onedpoints, onedpoints)
-    xcoords = np.ravel(twodpoints[0])
-    ycoords = np.ravel(twodpoints[1])
-    src_coordinates[:, 0] = xcoords
-    src_coordinates[:, 1] = ycoords
-    src_coordinates[:, -1] = model.origin[-1] + (2 + r/2)* spacing[-1]
-    plt.scatter(xcoords, ycoords, s=0.01)
-    plt.show()
+    nsrc = srcpd * srcpd
+
+    if layout == 'grid':
+        src_coordinates = define_sources_grid(srcpd, model, r)
+    elif layout == 'hemisphere':
+        src_coordinates = define_sources_hemisphere(srcpd, model)
+    else:
+        print("Invalid layout: %s" % layout)
+        return
 
     gridpoints = [tuple((int(floor((point[i]-origin[i])/grid.spacing[i])) - r/2)
                         for i in range(len(point))) for point in src_coordinates]
@@ -86,6 +84,42 @@ def run(r=16, srcpd=785):
     print("u_norm", np.linalg.norm(u.data))
     
 
+def define_sources_grid(srcpd, model, r, plot=True):
+    nsrc = srcpd * srcpd
+    grid = model.grid
+    spacing = model.spacing
+    src_coordinates = np.empty((nsrc, len(spacing)))
+    offset = grid.spacing[0] * r/2
+    onedpoints = np.linspace(offset, model.domain_size[0]-offset, num=srcpd)
+    twodpoints = np.meshgrid(onedpoints, onedpoints)
+    xcoords = np.ravel(twodpoints[0])
+    ycoords = np.ravel(twodpoints[1])
+    src_coordinates[:, 0] = xcoords
+    src_coordinates[:, 1] = ycoords
+    src_coordinates[:, 2] = model.origin[-1] + (2 + r/2)* spacing[-1]
+    if plot:
+        plt.scatter(xcoords, ycoords, s=0.01)
+        plt.show()
+    return src_coordinates
+
+
+def define_sources_hemisphere(srcpd, model, radius_hemisphere=5, plot=True):
+    nsrc = srcpd * srcpd
+    spacing = model.spacing
+    middle_point = np.array(model.domain_size) * 0.5
+    thetarange = np.linspace(0, 2*np.pi, num=srcpd)
+    phirange = np.linspace(0, np.pi/2, num=srcpd)
+    theta_values, phi_values = np.meshgrid(thetarange, phirange)
+    theta_values = np.ravel(theta_values)
+    phi_values = np.ravel(phi_values)
+    src_coordinates = np.empty((nsrc, len(spacing)))
+    src_coordinates[:, 0] = np.array([middle_point[0] + radius_hemisphere * cos(theta) * sin(phi) for theta, phi in zip(theta_values, phi_values)])
+    src_coordinates[:, 1] = np.array([middle_point[1] + radius_hemisphere * sin(theta) * sin(phi) for theta, phi in zip(theta_values, phi_values)])
+    src_coordinates[:, 2] = np.array([middle_point[2] + radius_hemisphere * cos(phi) for theta, phi in zip(theta_values, phi_values)])
+    if plot:
+        plt.scatter(src_coordinates[:, 0], src_coordinates[:, 2], s=0.01)
+        plt.show()
+    return src_coordinates
 
 if __name__ == "__main__":
     run()
