@@ -1,11 +1,13 @@
 import click
 import numpy as np
+import shutil
 from math import cos, floor, sin
 from scipy.signal.windows import kaiser
 import matplotlib.pyplot as plt
-from devito import PrecomputedSparseTimeFunction, TimeFunction, solve, Eq, Operator
+from devito import PrecomputedSparseTimeFunction, TimeFunction, solve, Eq, Operator, configuration
 from examples.seismic import Receiver, TimeAxis, RickerSource
 from overthrust import overthrust_model_iso
+from visitor import Visitor
 
 
 @click.command()
@@ -78,7 +80,10 @@ def run(r, srcpd, layout):
     # Substitute spacing terms to reduce flops
     op = Operator(eqns + src_term + rec_term, subs=model.spacing_map,
                     name='Forward')
-    
+    # Enable OpenMP - no need for env variable now
+    # configuration['language'] = 'openmp'
+    replace_op_source(op, "new.c")
+
     op.apply(dt=dt)
 
     print("u_norm", np.linalg.norm(u.data))
@@ -120,6 +125,15 @@ def define_sources_hemisphere(srcpd, model, radius_hemisphere=5, plot=True):
         plt.scatter(src_coordinates[:, 0], src_coordinates[:, 2], s=0.01)
         plt.show()
     return src_coordinates
+
+
+def replace_op_source(op, new_source_file):
+    source_file_path = "%s.c" % str(op._compiler.get_jit_dir().joinpath(op._soname))
+    # JIT BACKDOOR ensures Devito doesn't overwrite the new source file
+    configuration['jit-backdoor'] = True
+    shutil.copyfile(new_source_file, source_file_path)
+    op.cfunction # Force another round of JIT to be sure
+
 
 if __name__ == "__main__":
     run()
